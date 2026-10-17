@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ambica Motors - Inventory Dashboard</title>
+</head>
+<body>
+
+<h1>Ambica Motors Inventory Dashboard</h1>
+
+<h2>Overview</h2>
+<div id="stats">
+  <p>Loading stats...</p>
+</div>
+
+<h2>Products</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+  <thead>
+    <tr><th>SKU</th><th>Name</th><th>Vehicle Type</th><th>Battery Type</th><th>Base Price</th><th>Reorder Level</th><th>Active</th></tr>
+  </thead>
+  <tbody id="products-body">
+    <tr><td colspan="7">Loading products...</td></tr>
+  </tbody>
+</table>
+
+<h2>Purchase Orders</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+  <thead>
+    <tr><th>PO Number</th><th>Supplier</th><th>Invoice No</th><th>Date</th><th>Grand Total</th><th>Status</th></tr>
+  </thead>
+  <tbody id="pos-body">
+    <tr><td colspan="6">Loading purchase orders...</td></tr>
+  </tbody>
+</table>
+
+<h2>Recent Stock Movements</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+  <thead>
+    <tr><th>Date</th><th>Product</th><th>Movement Type</th><th>Quantity</th><th>Reference</th><th>Notes</th></tr>
+  </thead>
+  <tbody id="movements-body">
+    <tr><td colspan="6">Loading movements...</td></tr>
+  </tbody>
+</table>
+
+<h2>Suppliers</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+  <thead>
+    <tr><th>Name</th><th>GSTIN</th><th>PAN</th><th>City</th><th>State</th><th>Active</th></tr>
+  </thead>
+  <tbody id="suppliers-body">
+    <tr><td colspan="6">Loading suppliers...</td></tr>
+  </tbody>
+</table>
+
+<script>
+const SUPABASE_URL = 'https://trdqravaytlterwaldwh.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_BztO05-cj5mnEd2qPmnnAw_0Dhhq_8B';
+
+async function supabase(table, select = '*') {
+  const url = `${SUPABASE_URL}/rest/v1/inventory.${table}?select=${select}`;
+  const res = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
+  if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
+  return res.json();
+}
+
+function formatMoney(n) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n || 0);
+}
+
+function formatDate(iso) {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleDateString('en-IN');
+}
+
+async function loadStats() {
+  try {
+    const [products, suppliers, orders, units] = await Promise.all([
+      supabase('products'),
+      supabase('suppliers'),
+      supabase('purchase_orders'),
+      supabase('inventory_units')
+    ]);
+
+    const totalValue = products.reduce((sum, p) => sum + (parseFloat(p.base_price) || 0), 0);
+
+    document.getElementById('stats').innerHTML = `
+      <p><strong>Products:</strong> ${products.length}</p>
+      <p><strong>Suppliers:</strong> ${suppliers.length}</p>
+      <p><strong>Purchase Orders:</strong> ${orders.length}</p>
+      <p><strong>Inventory Units:</strong> ${units.length}</p>
+      <p><strong>Catalog Value (base price sum):</strong> ${formatMoney(totalValue)}</p>
+    `;
+  } catch (err) {
+    document.getElementById('stats').innerHTML = `<p style="color:red">Error loading stats: ${err.message}</p>`;
+  }
+}
+
+async function loadProducts() {
+  try {
+    const data = await supabase('products');
+    const body = document.getElementById('products-body');
+    if (!data || data.length === 0) {
+      body.innerHTML = '<tr><td colspan="7">No products found.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.map(p => `
+      <tr>
+        <td>${p.sku}</td>
+        <td>${p.name}</td>
+        <td>${p.vehicle_type || '-'}</td>
+        <td>${p.battery_type || '-'}</td>
+        <td>${formatMoney(p.base_price)}</td>
+        <td>${p.reorder_level || 0}</td>
+        <td>${p.is_active ? 'Yes' : 'No'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    document.getElementById('products-body').innerHTML = `<tr><td colspan="7" style="color:red">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function loadPurchaseOrders() {
+  try {
+    const data = await supabase('purchase_orders');
+    const body = document.getElementById('pos-body');
+    if (!data || data.length === 0) {
+      body.innerHTML = '<tr><td colspan="6">No purchase orders found.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.map(po => `
+      <tr>
+        <td>${po.po_number}</td>
+        <td>${po.supplier_id}</td>
+        <td>${po.invoice_number}</td>
+        <td>${formatDate(po.invoice_date)}</td>
+        <td>${formatMoney(po.grand_total)}</td>
+        <td>${po.status}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    document.getElementById('pos-body').innerHTML = `<tr><td colspan="6" style="color:red">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function loadMovements() {
+  try {
+    const data = await supabase('stock_movements', '*,products(name)');
+    const body = document.getElementById('movements-body');
+    if (!data || data.length === 0) {
+      body.innerHTML = '<tr><td colspan="6">No stock movements found.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.slice(0, 20).map(m => `
+      <tr>
+        <td>${formatDate(m.created_at)}</td>
+        <td>${m.products ? m.products.name : m.product_id}</td>
+        <td>${m.movement_type}</td>
+        <td>${m.quantity}</td>
+        <td>${m.reference_type || '-'}</td>
+        <td>${m.notes || '-'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    document.getElementById('movements-body').innerHTML = `<tr><td colspan="6" style="color:red">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function loadSuppliers() {
+  try {
+    const data = await supabase('suppliers');
+    const body = document.getElementById('suppliers-body');
+    if (!data || data.length === 0) {
+      body.innerHTML = '<tr><td colspan="6">No suppliers found.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.map(s => `
+      <tr>
+        <td>${s.name}</td>
+        <td>${s.gstin || '-'}</td>
+        <td>${s.pan || '-'}</td>
+        <td>${s.city || '-'}</td>
+        <td>${s.state || '-'}</td>
+        <td>${s.is_active ? 'Yes' : 'No'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    document.getElementById('suppliers-body').innerHTML = `<tr><td colspan="6" style="color:red">Error: ${err.message}</td></tr>`;
+  }
+}
+
+loadStats();
+loadProducts();
+loadPurchaseOrders();
+loadMovements();
+loadSuppliers();
+</script>
+
+</body>
+</html>
